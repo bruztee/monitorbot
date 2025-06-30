@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 load_dotenv()
 
@@ -172,23 +172,23 @@ class LinkBot:
 
 bot_instance = LinkBot()
 
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text(
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "🔗 Link Monitor Bot\n\nВыберите действие:",
         reply_markup=bot_instance.get_main_keyboard()
     )
 
-def button_handler(update: Update, context: CallbackContext):
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     if query.data == "add_link":
-        query.edit_message_text("📝 Отправьте ссылку для добавления:")
+        await query.edit_message_text("📝 Отправьте ссылку для добавления:")
         context.user_data['waiting_for'] = 'link'
         
     elif query.data == "list_links":
         if not bot_instance.links:
-            query.edit_message_text(
+            await query.edit_message_text(
                 "📋 Список ссылок пуст",
                 reply_markup=bot_instance.get_main_keyboard()
             )
@@ -199,14 +199,14 @@ def button_handler(update: Update, context: CallbackContext):
                 display_link = link[:80] + "..." if len(link) > 80 else link
                 links_text += f"{i}. {display_link}\n"
             
-            query.edit_message_text(
+            await query.edit_message_text(
                 links_text,
                 reply_markup=bot_instance.get_main_keyboard()
             )
     
     elif query.data == "delete_link":
         if not bot_instance.links:
-            query.edit_message_text(
+            await query.edit_message_text(
                 "📋 Список ссылок пуст",
                 reply_markup=bot_instance.get_main_keyboard()
             )
@@ -218,18 +218,18 @@ def button_handler(update: Update, context: CallbackContext):
                 keyboard.append([InlineKeyboardButton(f"🗑 {display_text}", callback_data=f"del_{i}")])
             keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")])
             
-            query.edit_message_text(
+            await query.edit_message_text(
                 "Выберите ссылку для удаления:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
     
     elif query.data == "set_interval":
-        query.edit_message_text("⏱ Отправьте интервал проверки в секундах:")
+        await query.edit_message_text("⏱ Отправьте интервал проверки в секундах:")
         context.user_data['waiting_for'] = 'interval'
         
     elif query.data == "set_proxy_il":
         current_proxy = bot_instance.proxy_il or "Не установлен"
-        query.edit_message_text(
+        await query.edit_message_text(
             f"🇮🇱 Текущий прокси Израиль: {current_proxy}\n\n"
             "Отправьте прокси в формате:\n"
             "residential.birdproxies.com:7777:pool-p1-cc-il:lnal286wfd376e9j"
@@ -238,7 +238,7 @@ def button_handler(update: Update, context: CallbackContext):
         
     elif query.data == "set_proxy_ua":
         current_proxy = bot_instance.proxy_ua or "Не установлен"
-        query.edit_message_text(
+        await query.edit_message_text(
             f"🇺🇦 Текущий прокси Украина: {current_proxy}\n\n"
             "Отправьте прокси в формате:\n"
             "residential.birdproxies.com:7777:pool-p1-cc-ua:lnal286wfd376e9j"
@@ -252,18 +252,18 @@ def button_handler(update: Update, context: CallbackContext):
         
         # Show truncated URL in deletion confirmation
         display_url = deleted_link[:60] + "..." if len(deleted_link) > 60 else deleted_link
-        query.edit_message_text(
+        await query.edit_message_text(
             f"🗑 Ссылка удалена:\n{display_url}",
             reply_markup=bot_instance.get_main_keyboard()
         )
         
     elif query.data == "back_to_main":
-        query.edit_message_text(
+        await query.edit_message_text(
             "🔗 Link Monitor Bot\n\nВыберите действие:",
             reply_markup=bot_instance.get_main_keyboard()
         )
 
-def message_handler(update: Update, context: CallbackContext):
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     waiting_for = context.user_data.get('waiting_for')
     
     if waiting_for == 'link':
@@ -273,7 +273,7 @@ def message_handler(update: Update, context: CallbackContext):
         if url.startswith(('http://', 'https://')) and len(url) > 10:
             # Check if link already exists
             if url in bot_instance.links:
-                update.message.reply_text(
+                await update.message.reply_text(
                     "⚠️ Эта ссылка уже добавлена",
                     reply_markup=bot_instance.get_main_keyboard()
                 )
@@ -283,12 +283,12 @@ def message_handler(update: Update, context: CallbackContext):
                 
                 # Show truncated URL in confirmation
                 display_url = url[:60] + "..." if len(url) > 60 else url
-                update.message.reply_text(
+                await update.message.reply_text(
                     f"✅ Ссылка добавлена:\n{display_url}",
                     reply_markup=bot_instance.get_main_keyboard()
                 )
         else:
-            update.message.reply_text(
+            await update.message.reply_text(
                 "❌ Неверный формат ссылки. Используйте http:// или https://",
                 reply_markup=bot_instance.get_main_keyboard()
             )
@@ -298,7 +298,7 @@ def message_handler(update: Update, context: CallbackContext):
         try:
             interval = int(update.message.text.strip())
             if interval < 10:
-                update.message.reply_text(
+                await update.message.reply_text(
                     "❌ Минимальный интервал - 10 секунд",
                     reply_markup=bot_instance.get_main_keyboard()
                 )
@@ -321,12 +321,12 @@ def message_handler(update: Update, context: CallbackContext):
                 except Exception as e:
                     logger.error(f"Error restarting job: {e}")
                 
-                update.message.reply_text(
+                await update.message.reply_text(
                     f"✅ Интервал установлен: {interval} секунд",
                     reply_markup=bot_instance.get_main_keyboard()
                 )
         except ValueError:
-            update.message.reply_text(
+            await update.message.reply_text(
                 "❌ Введите число",
                 reply_markup=bot_instance.get_main_keyboard()
             )
@@ -336,7 +336,7 @@ def message_handler(update: Update, context: CallbackContext):
         proxy = update.message.text.strip()
         bot_instance.proxy_il = proxy
         bot_instance.save_data()
-        update.message.reply_text(
+        await update.message.reply_text(
             f"✅ 🇮🇱 Прокси Израиль установлен: {proxy}",
             reply_markup=bot_instance.get_main_keyboard()
         )
@@ -346,7 +346,7 @@ def message_handler(update: Update, context: CallbackContext):
         proxy = update.message.text.strip()
         bot_instance.proxy_ua = proxy
         bot_instance.save_data()
-        update.message.reply_text(
+        await update.message.reply_text(
             f"✅ 🇺🇦 Прокси Украина установлен: {proxy}",
             reply_markup=bot_instance.get_main_keyboard()
         )
@@ -354,12 +354,12 @@ def message_handler(update: Update, context: CallbackContext):
     
     else:
         # Handle case when not waiting for any input
-        update.message.reply_text(
+        await update.message.reply_text(
             "🤔 Используйте /start для открытия меню",
             reply_markup=bot_instance.get_main_keyboard()
         )
 
-def check_links_task(context: CallbackContext):
+async def check_links_task(context: ContextTypes.DEFAULT_TYPE):
     if not bot_instance.links:
         return
     
@@ -381,7 +381,7 @@ def check_links_task(context: CallbackContext):
         report += "\n".join(all_results)
         
         try:
-            context.bot.send_message(chat_id=chat_id, text=report)
+            await context.bot.send_message(chat_id=chat_id, text=report)
         except Exception as e:
             logger.error(f"Error sending message: {e}")
 
@@ -391,15 +391,15 @@ def main():
         print("❌ BOT_TOKEN not found in environment variables")
         return
     
-    updater = Updater(token=bot_token, use_context=True)
-    dp = updater.dispatcher
+    application = Application.builder().token(bot_token).build()
     
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CallbackQueryHandler(button_handler))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, message_handler))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     
     # Schedule link checking
-    updater.job_queue.run_repeating(
+    job_queue = application.job_queue
+    job_queue.run_repeating(
         check_links_task, 
         interval=60,  # Will be updated dynamically based on bot_instance.check_interval
         first=10,
@@ -407,8 +407,7 @@ def main():
     )
     
     print("🚀 Bot starting...")
-    updater.start_polling()
-    updater.idle()
+    application.run_polling()
 
 if __name__ == "__main__":
     main() 
