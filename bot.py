@@ -53,104 +53,85 @@ class LinkBot:
         ]
         return InlineKeyboardMarkup(keyboard)
     
-    def check_link_with_curl(self, url, proxy_config=None, proxy_name="", max_retries=3):
+    def check_link_with_curl(self, url, proxy_config=None, proxy_name=""):
         display_url = url[:50] + "..." if len(url) > 50 else url
         
-        for attempt in range(max_retries):
-            try:
-                # Get both status code and response body with browser headers
-                cmd = [
-                    'curl', '-s', '-L', '-w', '%{http_code}', '--max-time', '30', '--compressed',
-                    '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-                    '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    '-H', 'Accept-Language: en-US,en;q=0.5',
-                    '-H', 'Connection: keep-alive',
-                    '-H', 'Upgrade-Insecure-Requests: 1'
+        try:
+            # Get both status code and response body with browser headers
+            cmd = [
+                'curl', '-s', '-L', '-w', '%{http_code}', '--max-time', '8', '--compressed',
+                '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+                '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                '-H', 'Accept-Language: en-US,en;q=0.5',
+                '-H', 'Connection: keep-alive',
+                '-H', 'Upgrade-Insecure-Requests: 1'
+            ]
+            
+            if proxy_config:
+                # Parse proxy format: residential.birdproxies.com:7777:pool-p1-cc-il:lnal286wfd376e9j
+                parts = proxy_config.split(':')
+                if len(parts) >= 4:
+                    host = parts[0]
+                    port = parts[1]
+                    user = parts[2]
+                    password = parts[3]
+                    proxy_url = f"{user}:{password}@{host}:{port}"
+                    cmd.extend(['-x', proxy_url])
+            
+            cmd.append(url)
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            
+            # Log stderr if there are errors
+            if result.stderr:
+                logger.warning(f"Curl stderr: {result.stderr}")
+            
+            # Extract status code (last 3 characters) and response body
+            response = result.stdout
+            if len(response) >= 3:
+                status_code = response[-3:]
+                response_body = response[:-3] if len(response) > 3 else ""
+            else:
+                status_code = "000"
+                response_body = ""
+            
+            # First check HTTP status codes - they have priority
+            if status_code == '200':
+                # Double check it's not a masked Cloudflare page
+                if 'cloudflare' in response_body.lower() and 'ray id' in response_body.lower():
+                    return False, f"❌ {display_url} ({proxy_name}) - Cloudflare challenge"
+                return True, f"✅ {display_url} ({proxy_name}) - OK (200)"
+            elif status_code == '404':
+                return False, f"❌ {display_url} ({proxy_name}) - Not Found (404)"
+            elif status_code == '502':
+                return False, f"❌ {display_url} ({proxy_name}) - Bad Gateway (502)"
+            elif status_code == '403':
+                # Check if it's Cloudflare 403 or regular 403
+                cf_indicators = [
+                    'sorry, you have been blocked' in response_body.lower(),
+                    'attention required!' in response_body.lower() and 'cloudflare' in response_body.lower(),
+                    'cf-error-details' in response_body.lower(),
+                    'cf-wrapper' in response_body.lower()
                 ]
-                
-                if proxy_config:
-                    # Parse proxy format: residential.birdproxies.com:7777:pool-p1-cc-il:lnal286wfd376e9j
-                    parts = proxy_config.split(':')
-                    if len(parts) >= 4:
-                        host = parts[0]
-                        port = parts[1]
-                        user = parts[2]
-                        password = parts[3]
-                        proxy_url = f"{user}:{password}@{host}:{port}"
-                        cmd.extend(['-x', proxy_url])
-                
-                cmd.append(url)
-                
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=35)
-                
-                # Log stderr if there are errors
-                if result.stderr:
-                    logger.warning(f"Curl stderr: {result.stderr}")
-                
-                # Extract status code (last 3 characters) and response body
-                response = result.stdout
-                if len(response) >= 3:
-                    status_code = response[-3:]
-                    response_body = response[:-3] if len(response) > 3 else ""
+                if any(cf_indicators):
+                    return False, f"❌ {display_url} ({proxy_name}) - Cloudflare blocked (403)"
                 else:
-                    status_code = "000"
-                    response_body = ""
+                    return False, f"🚫 {display_url} ({proxy_name}) - Forbidden (403)"
+            elif status_code == '503':
+                # Check if it's Cloudflare 503 or regular 503
+                if 'cloudflare' in response_body.lower() and ('checking your browser' in response_body.lower() or 'cf-' in response_body.lower()):
+                    return False, f"❌ {display_url} ({proxy_name}) - Cloudflare challenge (503)"
+                else:
+                    return False, f"⚠️ {display_url} ({proxy_name}) - Service Unavailable (503)"
+            elif status_code == '000':
+                return False, f"❌ {display_url} ({proxy_name}) - Connection failed"
+            else:
+                return False, f"⚠️ {display_url} ({proxy_name}) - Status: {status_code}"
                 
-                # First check HTTP status codes - they have priority
-                if status_code == '200':
-                    # Double check it's not a masked Cloudflare page
-                    if 'cloudflare' in response_body.lower() and 'ray id' in response_body.lower():
-                        return False, f"🛡️ {display_url} ({proxy_name}) - Cloudflare challenge"
-                    return True, f"✅ {display_url} ({proxy_name}) - OK (200)"
-                elif status_code == '404':
-                    return False, f"❌ {display_url} ({proxy_name}) - Not Found (404)"
-                elif status_code == '502':
-                    return False, f"❌ {display_url} ({proxy_name}) - Bad Gateway (502)"
-                elif status_code == '403':
-                    # Check if it's Cloudflare 403 or regular 403
-                    cf_indicators = [
-                        'sorry, you have been blocked' in response_body.lower(),
-                        'attention required!' in response_body.lower() and 'cloudflare' in response_body.lower(),
-                        'cf-error-details' in response_body.lower(),
-                        'cf-wrapper' in response_body.lower()
-                    ]
-                    if any(cf_indicators):
-                        return False, f"🛡️ {display_url} ({proxy_name}) - Cloudflare blocked (403)"
-                    else:
-                        return False, f"🚫 {display_url} ({proxy_name}) - Forbidden (403)"
-                elif status_code == '503':
-                    # Check if it's Cloudflare 503 or regular 503
-                    if 'cloudflare' in response_body.lower() and ('checking your browser' in response_body.lower() or 'cf-' in response_body.lower()):
-                        return False, f"🛡️ {display_url} ({proxy_name}) - Cloudflare challenge (503)"
-                    else:
-                        return False, f"⚠️ {display_url} ({proxy_name}) - Service Unavailable (503)"
-                elif status_code == '000':
-                    # Connection failed - retry if not last attempt
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Connection failed for {display_url} ({proxy_name}), retrying... ({attempt + 1}/{max_retries})")
-                        continue
-                    else:
-                        return False, f"❌ {display_url} ({proxy_name}) - Connection failed (after {max_retries} retries)"
-                else:
-                    return False, f"⚠️ {display_url} ({proxy_name}) - Status: {status_code}"
-                    
-            except subprocess.TimeoutExpired:
-                # Timeout - retry if not last attempt
-                if attempt < max_retries - 1:
-                    logger.warning(f"Timeout for {display_url} ({proxy_name}), retrying... ({attempt + 1}/{max_retries})")
-                    continue
-                else:
-                    return False, f"❌ {display_url} ({proxy_name}) - Timeout (after {max_retries} retries)"
-            except Exception as e:
-                # Other error - retry if not last attempt
-                if attempt < max_retries - 1:
-                    logger.warning(f"Error for {display_url} ({proxy_name}): {str(e)}, retrying... ({attempt + 1}/{max_retries})")
-                    continue
-                else:
-                    return False, f"❌ {display_url} ({proxy_name}) - Error: {str(e)} (after {max_retries} retries)"
-        
-        # Should never reach here, but just in case
-        return False, f"❌ {display_url} ({proxy_name}) - Unknown error"
+        except subprocess.TimeoutExpired:
+            return False, f"❌ {display_url} ({proxy_name}) - Timeout"
+        except Exception as e:
+            return False, f"❌ {display_url} ({proxy_name}) - Error: {str(e)}"
 
     def check_link_both_proxies(self, url):
         """Check link through both proxies and return both results"""
