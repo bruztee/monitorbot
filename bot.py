@@ -391,16 +391,15 @@ def main():
         print("❌ BOT_TOKEN not found in environment variables")
         return
     
-    updater = Updater(bot_token, use_context=True)
-    dispatcher = updater.dispatcher
+    updater = Updater(token=bot_token, use_context=True)
+    dp = updater.dispatcher
     
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CallbackQueryHandler(button_handler))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, message_handler))
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CallbackQueryHandler(button_handler))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, message_handler))
     
     # Schedule link checking
-    job_queue = updater.job_queue
-    job_queue.run_repeating(
+    updater.job_queue.run_repeating(
         check_links_task, 
         interval=60,  # Will be updated dynamically based on bot_instance.check_interval
         first=10,
