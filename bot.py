@@ -96,20 +96,7 @@ class LinkBot:
                     status_code = "000"
                     response_body = ""
                 
-                # Check for Cloudflare challenge/block (more specific detection)
-                cf_challenge_indicators = [
-                    'sorry, you have been blocked' in response_body.lower(),
-                    'attention required!' in response_body.lower() and 'cloudflare' in response_body.lower(),
-                    'checking your browser before accessing' in response_body.lower(),
-                    'enable cookies' in response_body.lower() and 'cloudflare' in response_body.lower(),
-                    'cf-error-details' in response_body.lower(),
-                    'cf-wrapper' in response_body.lower() and status_code in ['403', '503']
-                ]
-                
-                if any(cf_challenge_indicators):
-                    logger.warning(f"Cloudflare challenge/block detected for {display_url} ({proxy_name})")
-                    return False, f"🛡️ {display_url} ({proxy_name}) - Cloudflare blocked"
-                
+                # First check HTTP status codes - they have priority
                 if status_code == '200':
                     # Double check it's not a masked Cloudflare page
                     if 'cloudflare' in response_body.lower() and 'ray id' in response_body.lower():
@@ -120,7 +107,23 @@ class LinkBot:
                 elif status_code == '502':
                     return False, f"❌ {display_url} ({proxy_name}) - Bad Gateway (502)"
                 elif status_code == '403':
-                    return False, f"🚫 {display_url} ({proxy_name}) - Forbidden (403)"
+                    # Check if it's Cloudflare 403 or regular 403
+                    cf_indicators = [
+                        'sorry, you have been blocked' in response_body.lower(),
+                        'attention required!' in response_body.lower() and 'cloudflare' in response_body.lower(),
+                        'cf-error-details' in response_body.lower(),
+                        'cf-wrapper' in response_body.lower()
+                    ]
+                    if any(cf_indicators):
+                        return False, f"🛡️ {display_url} ({proxy_name}) - Cloudflare blocked (403)"
+                    else:
+                        return False, f"🚫 {display_url} ({proxy_name}) - Forbidden (403)"
+                elif status_code == '503':
+                    # Check if it's Cloudflare 503 or regular 503
+                    if 'cloudflare' in response_body.lower() and ('checking your browser' in response_body.lower() or 'cf-' in response_body.lower()):
+                        return False, f"🛡️ {display_url} ({proxy_name}) - Cloudflare challenge (503)"
+                    else:
+                        return False, f"⚠️ {display_url} ({proxy_name}) - Service Unavailable (503)"
                 elif status_code == '000':
                     # Connection failed - retry if not last attempt
                     if attempt < max_retries - 1:
