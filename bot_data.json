@@ -1,8 +1,10 @@
 {
   "links": [
     "https://pieusetto.top/?utm_source=222_6&fbclid=IwY2xjawLNyElleHRuA2FlbQIxMABicmlkETBIOFBqa2NpN2ZtQXd0R2FtAR4ZbG5zWTQGxaCDz9QIGQzNKnb_6L8SUXHpeHI-OEP7pgPu3OomeyNpwwDwSg_aem_OH2zmjea1W2vzBg6xqdLQw",
-    "https://caje-necaje.info/e5a361abbb77/?fb_pixel=9865537850150671&fb_event=Lead&fbclid=IwY2xjawLPFoVleHRuA2FlbQIxMABicmlkETBIOFBqa2NpN2ZtQXd0R2FtAR6195RMNRc2WqfjQeuJPIysu5IC8CE9A7t_BIhVgVADy7DCNu1um5-yG3zQtg_aem_8qKS0hCphmXTSrXmV89lMg"
+    "https://caje-necaje.info/e5a361abbb77/?fb_pixel=9865537850150671&fb_event=Lead&fbclid=IwY2xjawLPFoVleHRuA2FlbQIxMABicmlkETBIOFBqa2NpN2ZtQXd0R2FtAR6195RMNRc2WqfjQeuJPIysu5IC8CE9A7t_BIhVgVADy7DCNu1um5-yG3zQtg_aem_8qKS0hCphmXTSrXmV89lMg",
+    "https://krm-freixa.info/10b92998c567/?fb_pixel=9865537850150671&fb_event=Lead&fbclid=IwY2xjawLPFotleHRuA2FlbQIxMABicmlkETBIOFBqa2NpN2ZtQXd0R2FtAR5MD0c7jNe3Yc99pMyiVk-aNgAzK0q9s0PqY4GIak6Ot4l-1xi8k59uSmC1Rg_aem_papdwDyx4wD_O2nJ1YLdbA"
   ],
-  "proxy": "residential.birdproxies.com:7777:pool-p1-cc-il:lnal286wfd376e9j",
-  "check_interval": 200
+  "proxy_il": "residential.birdproxies.com:7777:pool-p1-cc-il:lnal286wfd376e9j",
+  "proxy_ua": "residential.birdproxies.com:7777:pool-p1-cc-ua:lnal286wfd376e9j",
+  "check_interval": 60
 }

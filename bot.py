@@ -22,18 +22,21 @@ class LinkBot:
             with open(self.data_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 self.links = data.get('links', [])
-                self.proxy = data.get('proxy', '')
+                self.proxy_il = data.get('proxy_il', '')  # Israel proxy
+                self.proxy_ua = data.get('proxy_ua', '')  # Ukraine proxy
                 self.check_interval = data.get('check_interval', 60)
         except FileNotFoundError:
             self.links = []
-            self.proxy = ''
+            self.proxy_il = ''
+            self.proxy_ua = ''
             self.check_interval = 60
             self.save_data()
     
     def save_data(self):
         data = {
             'links': self.links,
-            'proxy': self.proxy,
+            'proxy_il': self.proxy_il,
+            'proxy_ua': self.proxy_ua,
             'check_interval': self.check_interval
         }
         with open(self.data_file, 'w', encoding='utf-8') as f:
@@ -45,20 +48,29 @@ class LinkBot:
             [InlineKeyboardButton("📋 Список ссылок", callback_data="list_links")],
             [InlineKeyboardButton("🗑 Удалить ссылку", callback_data="delete_link")],
             [InlineKeyboardButton("⏱ Задержка между проверками", callback_data="set_interval")],
-            [InlineKeyboardButton("🌐 Прокси", callback_data="set_proxy")]
+            [InlineKeyboardButton("🇮🇱 Прокси Израиль", callback_data="set_proxy_il")],
+            [InlineKeyboardButton("🇺🇦 Прокси Украина", callback_data="set_proxy_ua")]
         ]
         return InlineKeyboardMarkup(keyboard)
     
-    def check_link_with_curl(self, url, max_retries=3):
+    def check_link_with_curl(self, url, proxy_config=None, proxy_name="", max_retries=3):
         display_url = url[:50] + "..." if len(url) > 50 else url
         
         for attempt in range(max_retries):
             try:
-                cmd = ['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}']
+                # Get both status code and response body with browser headers
+                cmd = [
+                    'curl', '-s', '-L', '-w', '%{http_code}', '--max-time', '30', '--compressed',
+                    '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+                    '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    '-H', 'Accept-Language: en-US,en;q=0.5',
+                    '-H', 'Connection: keep-alive',
+                    '-H', 'Upgrade-Insecure-Requests: 1'
+                ]
                 
-                if self.proxy:
+                if proxy_config:
                     # Parse proxy format: residential.birdproxies.com:7777:pool-p1-cc-il:lnal286wfd376e9j
-                    parts = self.proxy.split(':')
+                    parts = proxy_config.split(':')
                     if len(parts) >= 4:
                         host = parts[0]
                         port = parts[1]
@@ -69,42 +81,104 @@ class LinkBot:
                 
                 cmd.append(url)
                 
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-                status_code = result.stdout.strip()
+                # Debug: log the curl command
+                logger.info(f"Executing curl command: {' '.join(cmd[:10])}... (truncated)")
+                
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=35)
+                
+                # Log stderr if there are errors
+                if result.stderr:
+                    logger.warning(f"Curl stderr: {result.stderr}")
+                
+                # Extract status code (last 3 characters) and response body
+                response = result.stdout
+                if len(response) >= 3:
+                    status_code = response[-3:]
+                    response_body = response[:-3] if len(response) > 3 else ""
+                else:
+                    status_code = "000"
+                    response_body = ""
+                
+                # Debug logging
+                logger.info(f"URL: {display_url} ({proxy_name})")
+                logger.info(f"Status code: {status_code}")
+                logger.info(f"Response body preview: {response_body[:200]}...")
+                if proxy_config:
+                    logger.info(f"Proxy used: {proxy_config[:50]}...")
+                
+                # Check for Cloudflare challenge/block (more specific detection)
+                cf_challenge_indicators = [
+                    'sorry, you have been blocked' in response_body.lower(),
+                    'attention required!' in response_body.lower() and 'cloudflare' in response_body.lower(),
+                    'checking your browser before accessing' in response_body.lower(),
+                    'enable cookies' in response_body.lower() and 'cloudflare' in response_body.lower(),
+                    'cf-error-details' in response_body.lower(),
+                    'cf-wrapper' in response_body.lower() and status_code in ['403', '503']
+                ]
+                
+                if any(cf_challenge_indicators):
+                    logger.warning(f"Cloudflare challenge/block detected: {cf_challenge_indicators}")
+                    return False, f"🛡️ {display_url} ({proxy_name}) - Cloudflare blocked"
                 
                 if status_code == '200':
-                    return True, f"✅ {display_url} - OK (200)"
+                    # Double check it's not a masked Cloudflare page
+                    if 'cloudflare' in response_body.lower() and 'ray id' in response_body.lower():
+                        return False, f"🛡️ {display_url} ({proxy_name}) - Cloudflare challenge"
+                    return True, f"✅ {display_url} ({proxy_name}) - OK (200)"
                 elif status_code == '404':
-                    return False, f"❌ {display_url} - Not Found (404)"
+                    return False, f"❌ {display_url} ({proxy_name}) - Not Found (404)"
                 elif status_code == '502':
-                    return False, f"❌ {display_url} - Bad Gateway (502)"
+                    return False, f"❌ {display_url} ({proxy_name}) - Bad Gateway (502)"
+                elif status_code == '403':
+                    return False, f"🚫 {display_url} ({proxy_name}) - Forbidden (403)"
                 elif status_code == '000':
                     # Connection failed - retry if not last attempt
                     if attempt < max_retries - 1:
-                        logger.warning(f"Connection failed for {display_url}, retrying... ({attempt + 1}/{max_retries})")
+                        logger.warning(f"Connection failed for {display_url} ({proxy_name}), retrying... ({attempt + 1}/{max_retries})")
                         continue
                     else:
-                        return False, f"❌ {display_url} - Connection failed (after {max_retries} retries)"
+                        return False, f"❌ {display_url} ({proxy_name}) - Connection failed (after {max_retries} retries)"
                 else:
-                    return False, f"⚠️ {display_url} - Status: {status_code}"
+                    return False, f"⚠️ {display_url} ({proxy_name}) - Status: {status_code}"
                     
             except subprocess.TimeoutExpired:
                 # Timeout - retry if not last attempt
                 if attempt < max_retries - 1:
-                    logger.warning(f"Timeout for {display_url}, retrying... ({attempt + 1}/{max_retries})")
+                    logger.warning(f"Timeout for {display_url} ({proxy_name}), retrying... ({attempt + 1}/{max_retries})")
                     continue
                 else:
-                    return False, f"❌ {display_url} - Timeout (after {max_retries} retries)"
+                    return False, f"❌ {display_url} ({proxy_name}) - Timeout (after {max_retries} retries)"
             except Exception as e:
                 # Other error - retry if not last attempt
                 if attempt < max_retries - 1:
-                    logger.warning(f"Error for {display_url}: {str(e)}, retrying... ({attempt + 1}/{max_retries})")
+                    logger.warning(f"Error for {display_url} ({proxy_name}): {str(e)}, retrying... ({attempt + 1}/{max_retries})")
                     continue
                 else:
-                    return False, f"❌ {display_url} - Error: {str(e)} (after {max_retries} retries)"
+                    return False, f"❌ {display_url} ({proxy_name}) - Error: {str(e)} (after {max_retries} retries)"
         
         # Should never reach here, but just in case
-        return False, f"❌ {display_url} - Unknown error"
+        return False, f"❌ {display_url} ({proxy_name}) - Unknown error"
+
+    def check_link_both_proxies(self, url):
+        """Check link through both proxies and return both results"""
+        results = []
+        
+        # Check with Israel proxy
+        if self.proxy_il:
+            is_ok_il, msg_il = self.check_link_with_curl(url, self.proxy_il, "🇮🇱")
+            results.append(msg_il)
+        
+        # Check with Ukraine proxy  
+        if self.proxy_ua:
+            is_ok_ua, msg_ua = self.check_link_with_curl(url, self.proxy_ua, "🇺🇦")
+            results.append(msg_ua)
+        
+        # If no proxies configured, check without proxy
+        if not self.proxy_il and not self.proxy_ua:
+            is_ok, msg = self.check_link_with_curl(url, None, "🌐")
+            results.append(msg)
+        
+        return results
 
 bot_instance = LinkBot()
 
@@ -163,14 +237,23 @@ def button_handler(update: Update, context: CallbackContext):
         query.edit_message_text("⏱ Отправьте интервал проверки в секундах:")
         context.user_data['waiting_for'] = 'interval'
         
-    elif query.data == "set_proxy":
-        current_proxy = bot_instance.proxy or "Не установлен"
+    elif query.data == "set_proxy_il":
+        current_proxy = bot_instance.proxy_il or "Не установлен"
         query.edit_message_text(
-            f"🌐 Текущий прокси: {current_proxy}\n\n"
+            f"🇮🇱 Текущий прокси Израиль: {current_proxy}\n\n"
             "Отправьте прокси в формате:\n"
             "residential.birdproxies.com:7777:pool-p1-cc-il:lnal286wfd376e9j"
         )
-        context.user_data['waiting_for'] = 'proxy'
+        context.user_data['waiting_for'] = 'proxy_il'
+        
+    elif query.data == "set_proxy_ua":
+        current_proxy = bot_instance.proxy_ua or "Не установлен"
+        query.edit_message_text(
+            f"🇺🇦 Текущий прокси Украина: {current_proxy}\n\n"
+            "Отправьте прокси в формате:\n"
+            "residential.birdproxies.com:7777:pool-p1-cc-ua:lnal286wfd376e9j"
+        )
+        context.user_data['waiting_for'] = 'proxy_ua'
         
     elif query.data.startswith("del_"):
         index = int(query.data.split("_")[1])
@@ -266,12 +349,22 @@ def message_handler(update: Update, context: CallbackContext):
             )
         context.user_data.pop('waiting_for', None)
         
-    elif waiting_for == 'proxy':
+    elif waiting_for == 'proxy_il':
         proxy = update.message.text.strip()
-        bot_instance.proxy = proxy
+        bot_instance.proxy_il = proxy
         bot_instance.save_data()
         update.message.reply_text(
-            f"✅ Прокси установлен: {proxy}",
+            f"✅ 🇮🇱 Прокси Израиль установлен: {proxy}",
+            reply_markup=bot_instance.get_main_keyboard()
+        )
+        context.user_data.pop('waiting_for', None)
+        
+    elif waiting_for == 'proxy_ua':
+        proxy = update.message.text.strip()
+        bot_instance.proxy_ua = proxy
+        bot_instance.save_data()
+        update.message.reply_text(
+            f"✅ 🇺🇦 Прокси Украина установлен: {proxy}",
             reply_markup=bot_instance.get_main_keyboard()
         )
         context.user_data.pop('waiting_for', None)
@@ -292,14 +385,18 @@ def check_links_task(context: CallbackContext):
     if not chat_id:
         return
         
-    results = []
+    all_results = []
     for link in bot_instance.links:
-        is_ok, message = bot_instance.check_link_with_curl(link)
-        results.append(message)
+        # Check through both proxies
+        link_results = bot_instance.check_link_both_proxies(link)
+        all_results.extend(link_results)
+        # Add empty line between different links if multiple proxies
+        if len(link_results) > 1:
+            all_results.append("")
     
-    if results:
+    if all_results:
         report = f"🔍 Проверка ссылок ({datetime.now().strftime('%H:%M:%S')}):\n\n"
-        report += "\n".join(results)
+        report += "\n".join(all_results)
         
         try:
             context.bot.send_message(chat_id=chat_id, text=report)
