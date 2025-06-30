@@ -308,16 +308,19 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 # Restart the job with new interval
                 try:
-                    current_jobs = context.job_queue.get_jobs_by_name("link_checker")
-                    for job in current_jobs:
-                        job.schedule_removal()
-                    
-                    context.job_queue.run_repeating(
-                        check_links_task,
-                        interval=interval,
-                        first=5,
-                        name="link_checker"
-                    )
+                    if context.job_queue:
+                        current_jobs = context.job_queue.get_jobs_by_name("link_checker")
+                        for job in current_jobs:
+                            job.schedule_removal()
+                        
+                        context.job_queue.run_repeating(
+                            check_links_task,
+                            interval=interval,
+                            first=5,
+                            name="link_checker"
+                        )
+                    else:
+                        logger.warning("Job queue not available - cannot restart job")
                 except Exception as e:
                     logger.error(f"Error restarting job: {e}")
                 
@@ -391,20 +394,26 @@ def main():
         print("❌ BOT_TOKEN not found in environment variables")
         return
     
+    # Build application with job queue enabled
     application = Application.builder().token(bot_token).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     
-    # Schedule link checking
-    job_queue = application.job_queue
-    job_queue.run_repeating(
-        check_links_task, 
-        interval=60,  # Will be updated dynamically based on bot_instance.check_interval
-        first=10,
-        name="link_checker"
-    )
+    # Schedule link checking - check if job_queue exists
+    print(f"📊 Job queue status: {application.job_queue is not None}")
+    if application.job_queue:
+        print("✅ Starting automatic link checking...")
+        application.job_queue.run_repeating(
+            check_links_task, 
+            interval=60,  # Will be updated dynamically based on bot_instance.check_interval
+            first=10,
+            name="link_checker"
+        )
+    else:
+        print("⚠️ Job queue not available - automatic checking disabled")
+        print("💡 Manual checks will still work through the bot interface")
     
     print("🚀 Bot starting...")
     application.run_polling()
